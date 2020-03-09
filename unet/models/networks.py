@@ -52,6 +52,7 @@ def get_scheduler(optimizer, opt):
         def lambda_rule(epoch):
             lr_l = 1.0 - max(0, epoch + opt.epoch_count - opt.niter) / float(opt.niter_decay + 1)
             return lr_l
+
         scheduler = lr_scheduler.LambdaLR(optimizer, lr_lambda=lambda_rule)
     elif opt.lr_policy == 'step':
         scheduler = lr_scheduler.StepLR(optimizer, step_size=opt.lr_decay_iters, gamma=0.1)
@@ -75,6 +76,7 @@ def init_weights(net, init_type='normal', init_gain=0.02):
     We use 'normal' in the original pix2pix and CycleGAN paper. But xavier and kaiming might
     work better for some applications. Feel free to try yourself.
     """
+
     def init_func(m):  # define the initialization function
         classname = m.__class__.__name__
         if hasattr(m, 'weight') and (classname.find('Conv') != -1 or classname.find('Linear') != -1):
@@ -90,7 +92,8 @@ def init_weights(net, init_type='normal', init_gain=0.02):
                 raise NotImplementedError('initialization method [%s] is not implemented' % init_type)
             if hasattr(m, 'bias') and m.bias is not None:
                 init.constant_(m.bias.data, 0.0)
-        elif classname.find('BatchNorm2d') != -1:  # BatchNorm Layer's weight is not a matrix; only normal distribution applies.
+        elif classname.find(
+                'BatchNorm2d') != -1:  # BatchNorm Layer's weight is not a matrix; only normal distribution applies.
             init.normal_(m.weight.data, 1.0, init_gain)
             init.constant_(m.bias.data, 0.0)
 
@@ -109,14 +112,15 @@ def init_net(net, init_type='normal', init_gain=0.02, gpu_ids=[]):
     Return an initialized network.
     """
     if len(gpu_ids) > 0:
-        assert(torch.cuda.is_available())
+        assert (torch.cuda.is_available())
         net.to(gpu_ids[0])
         net = torch.nn.DataParallel(net, gpu_ids)  # multi-GPUs
     init_weights(net, init_type, init_gain=init_gain)
     return net
 
 
-def define_G(input_nc, output_nc, ngf, netG, norm='batch', use_dropout=False, init_type='normal', init_gain=0.02, gpu_ids=[]):
+def define_G(input_nc, output_nc, ngf, netG, norm='batch', use_dropout=False, init_type='normal', init_gain=0.02,
+             gpu_ids=[]):
     """Create a generator
 
     Parameters:
@@ -154,6 +158,9 @@ def define_G(input_nc, output_nc, ngf, netG, norm='batch', use_dropout=False, in
         net = UnetGenerator(input_nc, output_nc, 7, ngf, norm_layer=norm_layer, use_dropout=use_dropout)
     elif netG == 'unet_256':
         net = UnetGenerator(input_nc, output_nc, 8, ngf, norm_layer=norm_layer, use_dropout=use_dropout)
+    elif netG == 'Restep':
+        net = RestepGenerator(input_nc, ngf, norm_layer=norm_layer, use_dropout=use_dropout, n_stages=4,
+                              layers=[2, 2, 2, 2])
     else:
         raise NotImplementedError('Generator model name [%s] is not recognized' % netG)
     return init_net(net, init_type, init_gain, gpu_ids)
@@ -196,7 +203,7 @@ def define_D(input_nc, ndf, netD, n_layers_D=3, norm='batch', init_type='normal'
         net = NLayerDiscriminator(input_nc, ndf, n_layers=3, norm_layer=norm_layer)
     elif netD == 'n_layers':  # more options
         net = NLayerDiscriminator(input_nc, ndf, n_layers_D, norm_layer=norm_layer)
-    elif netD == 'pixel':     # classify if each pixel is real or fake
+    elif netD == 'pixel':  # classify if each pixel is real or fake
         net = PixelDiscriminator(input_nc, ndf, norm_layer=norm_layer)
     else:
         raise NotImplementedError('Discriminator model name [%s] is not recognized' % netD)
@@ -290,13 +297,14 @@ def cal_gradient_penalty(netD, real_data, fake_data, device, type='mixed', const
     Returns the gradient penalty loss
     """
     if lambda_gp > 0.0:
-        if type == 'real':   # either use real images, fake images, or a linear interpolation of two.
+        if type == 'real':  # either use real images, fake images, or a linear interpolation of two.
             interpolatesv = real_data
         elif type == 'fake':
             interpolatesv = fake_data
         elif type == 'mixed':
             alpha = torch.rand(real_data.shape[0], 1, device=device)
-            alpha = alpha.expand(real_data.shape[0], real_data.nelement() // real_data.shape[0]).contiguous().view(*real_data.shape)
+            alpha = alpha.expand(real_data.shape[0], real_data.nelement() // real_data.shape[0]).contiguous().view(
+                *real_data.shape)
             interpolatesv = alpha * real_data + ((1 - alpha) * fake_data)
         else:
             raise NotImplementedError('{} not implemented'.format(type))
@@ -306,7 +314,7 @@ def cal_gradient_penalty(netD, real_data, fake_data, device, type='mixed', const
                                         grad_outputs=torch.ones(disc_interpolates.size()).to(device),
                                         create_graph=True, retain_graph=True, only_inputs=True)
         gradients = gradients[0].view(real_data.size(0), -1)  # flat the data
-        gradient_penalty = (((gradients + 1e-16).norm(2, dim=1) - constant) ** 2).mean() * lambda_gp        # added eps
+        gradient_penalty = (((gradients + 1e-16).norm(2, dim=1) - constant) ** 2).mean() * lambda_gp  # added eps
         return gradient_penalty, gradients
     else:
         return 0.0, None
@@ -318,7 +326,8 @@ class ResnetGenerator(nn.Module):
     We adapt Torch code and idea from Justin Johnson's neural style transfer project(https://github.com/jcjohnson/fast-neural-style)
     """
 
-    def __init__(self, input_nc, output_nc, ngf=64, norm_layer=nn.BatchNorm2d, use_dropout=False, n_blocks=6, padding_type='reflect'):
+    def __init__(self, input_nc, output_nc, ngf=64, norm_layer=nn.BatchNorm2d, use_dropout=False, n_blocks=6,
+                 padding_type='reflect'):
         """Construct a Resnet-based generator
 
         Parameters:
@@ -330,7 +339,7 @@ class ResnetGenerator(nn.Module):
             n_blocks (int)      -- the number of ResNet blocks
             padding_type (str)  -- the name of padding layer in conv layers: reflect | replicate | zero
         """
-        assert(n_blocks >= 0)
+        assert (n_blocks >= 0)
         super(ResnetGenerator, self).__init__()
         if type(norm_layer) == functools.partial:
             use_bias = norm_layer.func == nn.InstanceNorm2d
@@ -350,9 +359,10 @@ class ResnetGenerator(nn.Module):
                       nn.ReLU(True)]
 
         mult = 2 ** n_downsampling
-        for i in range(n_blocks):       # add ResNet blocks
+        for i in range(n_blocks):  # add ResNet blocks
 
-            model += [ResnetBlock(ngf * mult, padding_type=padding_type, norm_layer=norm_layer, use_dropout=use_dropout, use_bias=use_bias)]
+            model += [ResnetBlock(ngf * mult, padding_type=padding_type, norm_layer=norm_layer, use_dropout=use_dropout,
+                                  use_bias=use_bias)]
 
         for i in range(n_downsampling):  # add upsampling layers
             mult = 2 ** (n_downsampling - i)
@@ -451,14 +461,19 @@ class UnetGenerator(nn.Module):
         """
         super(UnetGenerator, self).__init__()
         # construct unet structure
-        unet_block = UnetSkipConnectionBlock(ngf * 8, ngf * 8, input_nc=None, submodule=None, norm_layer=norm_layer, innermost=True)  # add the innermost layer
-        for i in range(num_downs - 5):          # add intermediate layers with ngf * 8 filters
-            unet_block = UnetSkipConnectionBlock(ngf * 8, ngf * 8, input_nc=None, submodule=unet_block, norm_layer=norm_layer, use_dropout=use_dropout)
+        unet_block = UnetSkipConnectionBlock(ngf * 8, ngf * 8, input_nc=None, submodule=None, norm_layer=norm_layer,
+                                             innermost=True)  # add the innermost layer
+        for i in range(num_downs - 5):  # add intermediate layers with ngf * 8 filters
+            unet_block = UnetSkipConnectionBlock(ngf * 8, ngf * 8, input_nc=None, submodule=unet_block,
+                                                 norm_layer=norm_layer, use_dropout=use_dropout)
         # gradually reduce the number of filters from ngf * 8 to ngf
-        unet_block = UnetSkipConnectionBlock(ngf * 4, ngf * 8, input_nc=None, submodule=unet_block, norm_layer=norm_layer)
-        unet_block = UnetSkipConnectionBlock(ngf * 2, ngf * 4, input_nc=None, submodule=unet_block, norm_layer=norm_layer)
+        unet_block = UnetSkipConnectionBlock(ngf * 4, ngf * 8, input_nc=None, submodule=unet_block,
+                                             norm_layer=norm_layer)
+        unet_block = UnetSkipConnectionBlock(ngf * 2, ngf * 4, input_nc=None, submodule=unet_block,
+                                             norm_layer=norm_layer)
         unet_block = UnetSkipConnectionBlock(ngf, ngf * 2, input_nc=None, submodule=unet_block, norm_layer=norm_layer)
-        self.model = UnetSkipConnectionBlock(output_nc, ngf, input_nc=input_nc, submodule=unet_block, outermost=True, norm_layer=norm_layer)  # add the outermost layer
+        self.model = UnetSkipConnectionBlock(output_nc, ngf, input_nc=input_nc, submodule=unet_block, outermost=True,
+                                             norm_layer=norm_layer)  # add the outermost layer
 
     def forward(self, input):
         """Standard forward"""
@@ -531,8 +546,206 @@ class UnetSkipConnectionBlock(nn.Module):
     def forward(self, x):
         if self.outermost:
             return self.model(x)
-        else:   # add skip connections
+        else:  # add skip connections
             return torch.cat([x, self.model(x)], 1)
+
+
+class RestepGenerator(nn.Module):
+    def __init__(self, input_nc, ngf=64, norm_layer=nn.BatchNorm2d, use_dropout=False, n_stages=4, layers=[2, 2, 2, 2]):
+        """Construct a Restep-based generator
+
+        Parameters:
+            input_nc (int)      -- the number of channels in input images
+            output_nc (int)     -- the number of channels in output images
+            ngf (int)           -- the number of filters in the last conv layer
+            norm_layer          -- normalization layer
+            use_dropout (bool)  -- if use dropout layers
+            n_blocks (int)      -- the number of ResNet blocks
+            padding_type (str)  -- the name of padding layer in conv layers: reflect | replicate | zero
+        """
+        assert (n_stages >= 0)
+        super(RestepGenerator, self).__init__()
+        if type(norm_layer) == functools.partial:
+            use_bias = norm_layer.func == nn.InstanceNorm2d
+        else:
+            use_bias = norm_layer == nn.InstanceNorm2d
+
+        self.conv1 = nn.Conv2d(input_nc, ngf, kernel_size=7, stride=2, padding=3)
+        self.bn1 = nn.BatchNorm2d(ngf)
+        self.relu = nn.ReLU(inplace=True)
+
+        # stage 1
+        self.stage_1 = []
+        for layer in range(layers[0]):
+            if layer != layers[0] - 1:
+                self.stage_1.append(RestepBlock(ngf, norm_layer, False, use_bias))
+            else:
+                self.stage_1.append(RestepBlock(ngf, norm_layer, True, use_bias))
+        self.stage_1 = nn.Sequential(*self.stage_1)
+
+        self.stage_2 = [nn.Conv2d(ngf * 2, ngf * 2, 3, 2, 1), nn.BatchNorm2d(ngf * 2), nn.ReLU(inplace=True)]
+        for layer in range(layers[1]):
+            if layer != layers[1] - 1:
+                self.stage_2.append(RestepBlock(ngf * 2, norm_layer, False, use_bias))
+            else:
+                self.stage_2.append(RestepBlock(ngf * 2, norm_layer, True, use_bias))
+        self.stage_2 = nn.Sequential(*self.stage_2)
+
+        self.stage_3 = [nn.Conv2d(ngf * 4, ngf * 4, 3, 2, 1), nn.BatchNorm2d(ngf * 4), nn.ReLU(inplace=True)]
+        for layer in range(layers[2]):
+            if layer != layers[2] - 1:
+                self.stage_3.append(RestepBlock(ngf * 4, norm_layer, False, use_bias))
+            else:
+                self.stage_3.append(RestepBlock(ngf * 4, norm_layer, True, use_bias))
+        self.stage_3 = nn.Sequential(*self.stage_3)
+
+        self.stage_4 = [nn.Conv2d(ngf * 8, ngf * 8, 3, 2, 1), nn.BatchNorm2d(ngf * 8), nn.ReLU(inplace=True)]
+        for layer in range(layers[3]):
+            if layer != layers[3] - 1:
+                self.stage_4.append(RestepBlock(ngf * 8, norm_layer, False, use_bias))
+            else:
+                self.stage_4.append(RestepBlock(ngf * 8, norm_layer, True, use_bias))
+        self.stage_4 = nn.Sequential(*self.stage_4)
+
+        self.deconv1 = nn.ConvTranspose2d(in_channels=ngf * 16, out_channels=ngf * 8, kernel_size=3, stride=2,
+                                          padding=1, output_padding=1)
+        self.de_bn1 = nn.BatchNorm2d(ngf * 8)
+
+        self.deconv2 = nn.ConvTranspose2d(in_channels=ngf * 8, out_channels=ngf * 4, kernel_size=3, stride=2,
+                                          padding=1, output_padding=1)
+        self.de_bn2 = nn.BatchNorm2d(ngf * 4)
+
+        self.deconv3 = nn.ConvTranspose2d(in_channels=ngf * 4, out_channels=ngf * 2, kernel_size=3, stride=2,
+                                          padding=1, output_padding=1)
+        self.de_bn3 = nn.BatchNorm2d(ngf * 2)
+
+        self.deconv4 = nn.ConvTranspose2d(in_channels=ngf * 2, out_channels=ngf, kernel_size=3, stride=2,
+                                          padding=1, output_padding=1)
+        self.de_bn4 = nn.BatchNorm2d(ngf)
+
+        self.last_layer = nn.Conv2d(in_channels=ngf, out_channels=3, kernel_size=3, padding=1)
+
+    def forward(self, input):
+        """Standard forward"""
+        out = self.relu(self.bn1(self.conv1(input)))
+        out1 = self.stage_1(out)
+        out2 = self.stage_2(out1)
+        out3 = self.stage_3(out2)
+        out4 = self.stage_4(out3)
+        output = self.relu(self.de_bn1(self.deconv1(out4)))
+        output = output + out3
+        output = self.relu(self.de_bn2(self.deconv2(output)))
+        output = output + out2
+        output = self.relu(self.de_bn3(self.deconv3(output)))
+        output = output + out1
+        output = self.relu(self.de_bn4(self.deconv4(output)))
+        output = self.last_layer(output)
+        return output
+
+
+class RestepBlock(nn.Module):
+    """Define a Restep block"""
+
+    def __init__(self, dim, norm_layer, stage_final_block, use_bias):
+        """
+        Initialize the Restepblock
+        """
+        super(RestepBlock, self).__init__()
+        self.dim = dim
+        self.stage_final_block = stage_final_block
+
+        self.branch_a_conv1 = nn.Conv2d(in_channels=dim, out_channels=dim, kernel_size=3, stride=1, padding=1,
+                                        bias=use_bias)
+        self.branch_a_norm1 = norm_layer(dim)
+
+        self.branch_b_conv1 = nn.Conv2d(in_channels=dim, out_channels=dim, kernel_size=3, stride=1, padding=1,
+                                        bias=use_bias)
+        self.branch_b_norm1 = norm_layer(dim)
+        self.branch_b_conv2 = nn.Conv2d(in_channels=dim, out_channels=dim, kernel_size=3, stride=1, padding=1,
+                                        bias=use_bias)
+        self.branch_b_norm2 = norm_layer(dim)
+
+        self.branch_c_conv1 = nn.Conv2d(in_channels=dim, out_channels=dim, kernel_size=3, stride=1, padding=1,
+                                        bias=use_bias)
+        self.branch_c_norm1 = norm_layer(dim)
+        self.branch_c_conv2 = nn.Conv2d(in_channels=dim, out_channels=dim, kernel_size=3, stride=1, padding=1,
+                                        bias=use_bias)
+        self.branch_c_norm2 = norm_layer(dim)
+        self.branch_c_conv3 = nn.Conv2d(in_channels=dim, out_channels=dim, kernel_size=3, stride=1, padding=1,
+                                        bias=use_bias)
+        self.branch_c_norm3 = norm_layer(dim)
+
+        self.branch_d_conv1 = nn.Conv2d(in_channels=dim, out_channels=dim, kernel_size=3, stride=1, padding=1,
+                                        bias=use_bias)
+        self.branch_d_norm1 = norm_layer(dim)
+        self.branch_d_conv2 = nn.Conv2d(in_channels=dim, out_channels=dim, kernel_size=3, stride=1, padding=1,
+                                        bias=use_bias)
+        self.branch_d_norm2 = norm_layer(dim)
+        self.branch_d_conv3 = nn.Conv2d(in_channels=dim, out_channels=dim, kernel_size=3, stride=1, padding=1,
+                                        bias=use_bias)
+        self.branch_d_norm3 = norm_layer(dim)
+        self.branch_d_conv4 = nn.Conv2d(in_channels=dim, out_channels=dim, kernel_size=3, stride=1, padding=1,
+                                        bias=use_bias)
+        self.branch_d_norm4 = norm_layer(dim)
+
+        if stage_final_block:
+            self.fuse_conv = nn.Conv2d(in_channels=dim * 4, out_channels=dim * 2, kernel_size=1, stride=1, padding=0)
+            self.fuse_bn = nn.BatchNorm2d(dim * 2)
+        else:
+            self.fuse_conv = nn.Conv2d(in_channels=dim * 4, out_channels=dim, kernel_size=1, stride=1, padding=0)
+            self.fuse_bn = nn.BatchNorm2d(dim)
+        self.relu = nn.ReLU(inplace=True)
+
+    def forward(self, x):
+        """Forward function (with skip connections)"""
+
+        ##branch a
+        branch_a = self.relu(self.branch_a_norm1(self.branch_a_conv1(x)))
+
+        ##branch b
+        branch_b = torch.cat([x, branch_a], 1)
+        branch_b = self.relu(
+            nn.BatchNorm2d(self.dim)(nn.Conv2d(2 * self.dim, self.dim, 1, 1, 0, bias=False)(branch_b)))
+        branch_b_1 = self.relu(self.branch_b_norm1(self.branch_b_conv1(branch_b)))
+        branch_b_2 = self.relu(self.branch_b_norm2(self.branch_b_conv2(branch_b_1)))
+
+        ##branch c
+        branch_c = torch.cat([x, branch_b_1], 1)
+        branch_c = self.relu(
+            nn.BatchNorm2d(self.dim)(nn.Conv2d(2 * self.dim, self.dim, 1, 1, 0, bias=False)(branch_c)))
+        branch_c_1 = self.relu(self.branch_c_norm1(self.branch_c_conv1(branch_c)))
+
+        branch_c_2 = torch.cat([branch_b_2, branch_c_1], 1)
+        branch_c_2 = self.relu(
+            nn.BatchNorm2d(self.dim)(nn.Conv2d(2 * self.dim, self.dim, 1, 1, 0, bias=False)(branch_c_2)))
+        branch_c_2 = self.relu(self.branch_c_norm2(self.branch_c_conv2(branch_c_2)))
+        branch_c_3 = self.relu(self.branch_c_norm3(self.branch_c_conv3(branch_c_2)))
+
+        ##branch d
+        branch_d = torch.cat([x, branch_c_1], 1)
+        branch_d = self.relu(
+            nn.BatchNorm2d(self.dim)(nn.Conv2d(2 * self.dim, self.dim, 1, 1, 0, bias=False)(branch_d)))
+        branch_d = self.relu(self.branch_d_norm1(self.branch_d_conv1(branch_d)))
+
+        branch_d = torch.cat([branch_c_2, branch_d], 1)
+        branch_d = self.relu(
+            nn.BatchNorm2d(self.dim)(nn.Conv2d(2 * self.dim, self.dim, 1, 1, 0, bias=False)(branch_d)))
+        branch_d = self.relu(self.branch_d_norm2(self.branch_d_conv2(branch_d)))
+
+        branch_d = torch.cat([branch_c_3, branch_d], 1)
+        branch_d = self.relu(
+            nn.BatchNorm2d(self.dim)(nn.Conv2d(2 * self.dim, self.dim, 1, 1, 0, bias=False)(branch_d)))
+
+        branch_d = self.relu(self.branch_d_norm3(self.branch_d_conv3(branch_d)))
+        branch_d = self.relu(self.branch_d_norm4(self.branch_d_conv4(branch_d)))
+
+        ##fusion
+        out = torch.cat([branch_a, branch_b_2, branch_c_3, branch_d], 1)
+        out = self.relu(self.fuse_bn(self.fuse_conv(out)))
+
+        if not self.stage_final_block:
+            out = x + out  # add skip connections
+        return out
 
 
 class NLayerDiscriminator(nn.Module):
@@ -575,7 +788,8 @@ class NLayerDiscriminator(nn.Module):
             nn.LeakyReLU(0.2, True)
         ]
 
-        sequence += [nn.Conv2d(ndf * nf_mult, 1, kernel_size=kw, stride=1, padding=padw)]  # output 1 channel prediction map
+        sequence += [
+            nn.Conv2d(ndf * nf_mult, 1, kernel_size=kw, stride=1, padding=padw)]  # output 1 channel prediction map
         self.model = nn.Sequential(*sequence)
 
     def forward(self, input):
@@ -613,3 +827,10 @@ class PixelDiscriminator(nn.Module):
     def forward(self, input):
         """Standard forward."""
         return self.net(input)
+
+
+if __name__ == '__main__':
+    net = RestepGenerator(3, ngf=64, norm_layer=nn.InstanceNorm2d, use_dropout=False)
+    input = torch.zeros((8, 3, 64, 64))
+    output = net(input)
+    print(output.shape)
